@@ -47,6 +47,30 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-cyan-500 selection:text-slate-900">
 
+  <!-- API Key Modal (Muncul Otomatis Jika Belum Ada Key) -->
+  <div id="api-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+    <div class="custom-gradient-border rounded-2xl max-w-md w-full p-6 shadow-2xl border border-cyan-500/30 space-y-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center">
+          <i class="fa-solid fa-key text-lg"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-base text-white">Masukkan Gemini API Key</h3>
+          <p class="text-xs text-slate-400">Dibutuhkan untuk mengaktifkan mesin neural TTS.</p>
+        </div>
+      </div>
+      
+      <div class="space-y-2">
+        <input type="password" id="modal-api-input" placeholder="Tempel API Key di sini (contoh: AQ...)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white font-mono focus:outline-none focus:border-cyan-500">
+        <p class="text-[11px] text-slate-500">Belum punya? Ambil gratis di <a href="https://aistudio.google.com/" target="_blank" class="text-cyan-400 underline">Google AI Studio</a>.</p>
+      </div>
+
+      <button onclick="submitApiKey()" class="w-full py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 font-bold text-sm text-slate-950 transition shadow-lg shadow-cyan-500/20">
+        Simpan & Masuk Studio
+      </button>
+    </div>
+  </div>
+
   <!-- Header Nav -->
   <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-40">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -82,9 +106,12 @@
         </button>
       </nav>
 
-      <!-- Status Indicator -->
+      <!-- Status Indicator & Settings Button -->
       <div class="flex items-center space-x-3">
-        <div class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300">
+        <button onclick="openApiKeyModal()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-medium flex items-center gap-1.5 border border-slate-700">
+          <i class="fa-solid fa-key text-cyan-400"></i> API Key
+        </button>
+        <div class="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800/60 border border-slate-700/50 text-xs text-slate-300">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span class="font-mono">Gemini 2.5 Neural Engine</span>
         </div>
@@ -556,8 +583,11 @@
     // 1. DATA STATE & VOICE REPOSITORY
     // ==========================================
 
-    const GEMINI_API_KEY = ""; // Automatically handled by environment
-    const TTS_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`;
+    let GEMINI_API_KEY = localStorage.getItem("vox_gemini_key") || "";
+
+    function getTtsApiUrl() {
+      return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${GEMINI_API_KEY}`;
+    }
 
     // Curated High-Fidelity Voices from Gemini 2.5 TTS
     const VOICE_CATALOG = [
@@ -618,6 +648,10 @@
     // ==========================================
 
     window.addEventListener("DOMContentLoaded", () => {
+      if (!GEMINI_API_KEY) {
+        openApiKeyModal();
+      }
+
       initCanvas();
       populateVoiceDropdowns();
       renderVoiceCatalog(VOICE_CATALOG);
@@ -636,6 +670,27 @@
       globalAudio.addEventListener("timeupdate", updatePlaybackProgress);
       globalAudio.addEventListener("ended", onPlaybackEnded);
     });
+
+    // ==========================================
+    // API KEY MODAL FUNCTIONS
+    // ==========================================
+
+    function openApiKeyModal() {
+      document.getElementById("modal-api-input").value = GEMINI_API_KEY;
+      document.getElementById("api-modal").classList.remove("hidden");
+    }
+
+    function submitApiKey() {
+      const val = document.getElementById("modal-api-input").value.trim();
+      if (!val) {
+        showToast("API Key tidak boleh kosong!", "error");
+        return;
+      }
+      GEMINI_API_KEY = val;
+      localStorage.setItem("vox_gemini_key", GEMINI_API_KEY);
+      document.getElementById("api-modal").classList.add("hidden");
+      showToast("API Key berhasil disimpan!", "success");
+    }
 
     // ==========================================
     // 3. TAB MANAGEMENT
@@ -799,7 +854,6 @@
       const txt = document.getElementById("script-input").value;
       const charCount = txt.length;
       document.getElementById("char-count").innerText = charCount;
-      // Est: ~15 chars per second average in spoken Indonesian
       const estSeconds = Math.max(1, Math.round(charCount / 14));
       document.getElementById("est-duration").innerText = `~${estSeconds} detik`;
     }
@@ -833,6 +887,11 @@
     // ==========================================
 
     async function generateSpeech() {
+      if (!GEMINI_API_KEY) {
+        openApiKeyModal();
+        return;
+      }
+
       const script = document.getElementById("script-input").value.trim();
       if (!script) {
         showToast("Harap masukkan naskah teks terlebih dahulu!", "error");
@@ -854,13 +913,12 @@
       statusText.innerHTML = `<span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span> Mengolah neural PCM16 audio...`;
 
       try {
-        // Construct natural speech style direction based on emotion and custom clone persona
         let styleDirective = buildStylePrompt(voiceObj, emotionKey);
         const finalPrompt = `${styleDirective}\n\nBacakan teks berikut dengan artikulasi bahasa Indonesia yang sangat natural, intonasi hidup, dan jeda nafas realistis:\n"${rawText}"`;
 
-        // Determine prebuilt voice to use (if custom clone, use base voice)
         const voiceName = voiceObj.baseVoice ? voiceObj.baseVoice : voiceObj.id;
 
+        // Payload yang bersih sesuai standar Google TTS API
         const payload = {
           contents: [{
             parts: [{ text: finalPrompt }]
@@ -869,15 +927,15 @@
             responseModalities: ["AUDIO"],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voiceName }
+                prebuiltVoiceConfig: {
+                  voiceName: voiceName
+                }
               }
             }
-          },
-          model: "gemini-2.5-flash-preview-tts"
+          }
         };
 
-        // Call Gemini 2.5 TTS with exponential backoff handling
-        const responseData = await fetchWithRetry(TTS_API_URL, payload);
+        const responseData = await fetchWithRetry(getTtsApiUrl(), payload);
 
         const part = responseData?.candidates?.[0]?.content?.parts?.[0];
         const audioData = part?.inlineData?.data;
@@ -887,14 +945,12 @@
           throw new Error("Format respon audio tidak valid dari server.");
         }
 
-        // Parse Sample Rate from mimeType (usually audio/L16;rate=24000)
         let sampleRate = 24000;
         const match = mimeType.match(/rate=(\d+)/);
         if (match && match[1]) {
           sampleRate = parseInt(match[1], 10);
         }
 
-        // Decode PCM16 raw buffer to playable WAV Blob
         const pcmArrayBuffer = base64ToArrayBuffer(audioData);
         const pcm16 = new Int16Array(pcmArrayBuffer);
         const wavBlob = pcmToWav(pcm16, sampleRate);
@@ -904,17 +960,14 @@
         }
         audioBlobUrl = URL.createObjectURL(wavBlob);
 
-        // Mount to audio player
         const globalAudio = document.getElementById("global-audio");
         globalAudio.src = audioBlobUrl;
         
-        // Update Player UI
         document.getElementById("player-container").classList.remove("hidden");
         document.getElementById("player-voice-title").innerText = `Generated Speech - ${voiceObj.name} (${voiceObj.trait})`;
         document.getElementById("btn-download").href = audioBlobUrl;
         document.getElementById("btn-download").download = `voxcraft_${voiceObj.name.toLowerCase()}_${Date.now()}.wav`;
 
-        // Start playback & visualization
         await globalAudio.play();
         updatePlayPauseButton(true);
         startVisualizer(pcm16);
@@ -1040,6 +1093,11 @@
     }
 
     async function generateDialogueSpeech() {
+      if (!GEMINI_API_KEY) {
+        openApiKeyModal();
+        return;
+      }
+
       if (isGenerating) return;
       isGenerating = true;
 
@@ -1055,7 +1113,6 @@
         const s1Voice = document.getElementById("speaker1-voice").value;
         const s2Voice = document.getElementById("speaker2-voice").value;
 
-        // Formatted dialogue conversation script
         const formattedLines = dialogueTurns.map(t => `${t.speaker}: ${t.text}`).join("\n");
         const fullPrompt = `TTS the following conversation between ${s1Name} and ${s2Name} with expressive, lively natural intonations in Indonesian:\n${formattedLines}`;
 
@@ -1077,7 +1134,7 @@
           model: "gemini-2.5-flash-preview-tts"
         };
 
-        const result = await fetchWithRetry(TTS_API_URL, payload);
+        const result = await fetchWithRetry(getTtsApiUrl(), payload);
         const part = result?.candidates?.[0]?.content?.parts?.[0];
         const audioData = part?.inlineData?.data;
         const mimeType = part?.inlineData?.mimeType;
@@ -1204,7 +1261,6 @@
       renderClonedVoices();
       renderVoiceCatalog([...VOICE_CATALOG, ...customClones]);
 
-      // Clear input
       document.getElementById("clone-name").value = "";
       document.getElementById("clone-description").value = "";
       document.getElementById("audio-sample-preview").classList.add("hidden");
@@ -1264,44 +1320,29 @@
       return bytes.buffer;
     }
 
-    // Encodes PCM16 to valid RIFF/WAV Container
     function pcmToWav(pcm16Data, sampleRate) {
       const numChannels = 1;
-      const bytesPerSample = 2; // 16-bit
+      const bytesPerSample = 2;
       const blockAlign = numChannels * bytesPerSample;
       const byteRate = sampleRate * blockAlign;
       const dataByteLength = pcm16Data.length * bytesPerSample;
       const buffer = new ArrayBuffer(44 + dataByteLength);
       const view = new DataView(buffer);
 
-      // RIFF identifier
       writeString(view, 0, 'RIFF');
-      // file length minus RIFF header
       view.setUint32(4, 36 + dataByteLength, true);
-      // RIFF type
       writeString(view, 8, 'WAVE');
-      // format chunk identifier
       writeString(view, 12, 'fmt ');
-      // format chunk length
       view.setUint32(16, 16, true);
-      // sample format (raw PCM)
       view.setUint16(20, 1, true);
-      // channel count
       view.setUint16(22, numChannels, true);
-      // sample rate
       view.setUint32(24, sampleRate, true);
-      // byte rate
       view.setUint32(28, byteRate, true);
-      // block align
       view.setUint16(32, blockAlign, true);
-      // bits per sample
       view.setUint16(34, 16, true);
-      // data chunk identifier
       writeString(view, 36, 'data');
-      // data chunk length
       view.setUint32(40, dataByteLength, true);
 
-      // Write PCM Samples
       let offset = 44;
       for (let i = 0; i < pcm16Data.length; i++) {
         view.setInt16(offset, pcm16Data[i], true);
@@ -1317,7 +1358,6 @@
       }
     }
 
-    // Exponential Backoff Fetch
     async function fetchWithRetry(url, payload, maxRetries = 3) {
       let delay = 1000;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -1443,7 +1483,6 @@
 
       ctx.clearRect(0, 0, width, height);
 
-      // Draw subtle ElevenLabs Style Frequency Bars
       const gradient = ctx.createLinearGradient(0, 0, width, 0);
       gradient.addColorStop(0, '#06b6d4');
       gradient.addColorStop(0.5, '#6366f1');
@@ -1495,12 +1534,10 @@
 
       container.appendChild(toast);
       
-      // Animate in
       setTimeout(() => {
         toast.classList.remove("translate-y-2", "opacity-0");
       }, 10);
 
-      // Auto dismiss
       setTimeout(() => {
         toast.classList.add("opacity-0", "translate-x-4");
         setTimeout(() => toast.remove(), 300);
